@@ -1,0 +1,6 @@
+{:description "OpenTelemetry Support"
+ :namespaces  [otplike.otel]
+ :start-fn otplike.otel/start}
+
+
+
