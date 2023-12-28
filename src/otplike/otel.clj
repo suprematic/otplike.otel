@@ -3,6 +3,7 @@
    [clojure.string :as str]
    [clojure.set :as set]
    [clojure.core.async :as async]
+   [otplike.util :as u]
    [otplike.process :as p]
    [otplike.proc-util :as pu]
    [otplike.supervisor :as supervisor]
@@ -32,21 +33,12 @@
    :alert Severity/FATAL2
    :emergency Severity/FATAL3})
 
-(defn- strks [ks]
-  (when (some? ks)
-    (if-not (string? ks)
-      (let [name (name ks)]
-        (if-let [ns (namespace ks)]
-          (str ns "/" name)
-          name))
-      ks)))
-
 (defn- flatten-map [m prefix]
   (letfn
    [(fvalue [v]
       (cond
         (or (keyword? v) (symbol? v))
-        (strks v)
+        (u/strks v)
         :else
         (str v)))]
 
@@ -103,8 +95,8 @@
         message
         (let
          [{:keys [in what]} m
-          in (or (strks in) "<undefined>")
-          what (strks what)]
+          in (or (u/strks in) "<undefined>")
+          what (u/strks what)]
           (if what
             (format "%s %s" in what)
             in)))))))
