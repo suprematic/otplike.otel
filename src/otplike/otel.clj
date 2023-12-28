@@ -1,6 +1,7 @@
 (ns otplike.otel
   (:require
    [clojure.string :as str]
+   [clojure.set :as set]
    [clojure.core.async :as async]
    [otplike.process :as p]
    [otplike.proc-util :as pu]
@@ -11,7 +12,8 @@
    [steffan-westcott.clj-otel.context :as context]
    [steffan-westcott.clj-otel.sdk.autoconfigure :as autoconf])
   (:import
-   [io.opentelemetry.api.common Attributes]))
+   [io.opentelemetry.api.common Attributes]
+   [io.opentelemetry.api.logs Severity]))
 
 (defonce ^:private sdk
   (autoconf/init-otel-sdk!
@@ -21,31 +23,30 @@
   (.getLogsBridge sdk))
 
 (def ^:private otel-severity
-  (try
-    (let [logs-severity (import 'io.opentelemetry.api.logs.Severity)]
-      (letfn
-       [(severity [s]
-          (-> (.getField logs-severity (name s)) (.get nil)))]
-        #(get
-          {:debug   (severity 'DEBUG)
-           :notice  (severity 'INFO)
-           :info (severity 'INFO2)
-           :warning (severity 'WARN)
-           :error (severity 'ERROR)
-           :critical (severity 'FATAL)
-           :alert (severity 'FATAL2)
-           :emergency (severity 'FATAL3)}
-          %
-          (severity 'UNDEFINED_SEVERITY_NUMBER))))
-    (catch ClassNotFoundException _
-      nil)))
+  {:debug   Severity/DEBUG
+   :notice   Severity/INFO
+   :info  Severity/INFO2
+   :warning Severity/INFO
+   :error Severity/ERROR
+   :critical Severity/FATAL
+   :alert Severity/FATAL2
+   :emergency Severity/FATAL3})
+
+(defn- strks [ks]
+  (when (some? ks)
+    (if-not (string? ks)
+      (let [name (name ks)]
+        (if-let [ns (namespace ks)]
+          (str ns "/" name)
+          name))
+      ks)))
 
 (defn- flatten-map [m prefix]
   (letfn
    [(fvalue [v]
       (cond
         (or (keyword? v) (symbol? v))
-        (name v)
+        (strks v)
         :else
         (str v)))]
 
@@ -89,29 +90,49 @@
       (Attributes/builder))
      (.build))))
 
-(defn- format-body [{:keys [message in what]}]
-  (if-not (str/blank? message)
-    message
-    (let
-     [what
-      (cond
-        (or (keyword? what) (symbol? what))
-        (name what)
-        :else
-        "")]
-      (format "%s %s" in  what))))
+(defn- fix-id [m]
+  (set/rename-keys m {:id "log.record.uid"}))
 
-(defn- output [{:keys [level when in] :as m}]
+(defn- fix-message [m]
+  (->
+   m
+   (update
+    :message
+    (fn [message]
+      (if-not (str/blank? message)
+        message
+        (let
+         [{:keys [in what]} m
+          in (or (strks in) "<undefined>")
+          what (strks what)]
+          (if what
+            (format "%s %s" in what)
+            in)))))))
+
+(defn- fix-exception [{:keys [exception] :as m}]
+  (if (and (some? exception) (instance? java.lang.Throwable exception))
+    (-> m
+        (dissoc :exception)
+        (merge
+         {"exception.type" (.getName (class exception))
+          "exception.stacktrace" (pr-str exception)}
+         (when-let [message (.getMessage exception)]
+           {"exception.message" message})))
+    m))
+
+(defn- output [m]
   (let
-   [log
+   [{:keys [level when in message] :as m}
+    (-> m fix-id fix-message fix-exception)
+    log
     (-> logs-bridge
         (.get in)
         (.logRecordBuilder)
         (.setAllAttributes (otel-attributes (dissoc m :level :when :message)))
         (.setSeverityText (name level))
-        (.setSeverity (otel-severity level))
+        (.setSeverity (get otel-severity level Severity/UNDEFINED_SEVERITY_NUMBER))
         (.setTimestamp (.toInstant when))
-        (.setBody (format-body m)))]
+        (.setBody message))]
     (.emit log)))
 
 (defonce ^:private in
