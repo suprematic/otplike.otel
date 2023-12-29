@@ -18,7 +18,7 @@
 
 (defonce ^:private sdk
   (autoconf/init-otel-sdk!
-   {:set-as-default true :set-as-global true}))
+   {:set-as-default false :set-as-global false}))
 
 (defonce ^:private logs-bridge
   (.getLogsBridge sdk))
