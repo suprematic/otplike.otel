@@ -10,18 +10,11 @@
    [otplike.kernel.tracing :as tracing]
    [otplike.kernel.logger :as klogger]
    [otplike.logger :as logger]
-   [steffan-westcott.clj-otel.context :as context]
-   [steffan-westcott.clj-otel.sdk.autoconfigure :as autoconf])
+   [steffan-westcott.clj-otel.context :as context])
   (:import
+   [io.opentelemetry.api GlobalOpenTelemetry]
    [io.opentelemetry.api.common Attributes]
    [io.opentelemetry.api.logs Severity]))
-
-(defonce ^:private sdk
-  (autoconf/init-otel-sdk!
-   {:set-as-default false :set-as-global false}))
-
-(defonce ^:private logs-bridge
-  (.getLogsBridge sdk))
 
 (def ^:private otel-severity
   {:debug   Severity/DEBUG
@@ -117,7 +110,7 @@
    [{:keys [level when in message] :as m}
     (-> m fix-id fix-message fix-exception)
     log
-    (-> logs-bridge
+    (-> (.getLogsBridge (GlobalOpenTelemetry/get))
         (.get in)
         (.logRecordBuilder)
         (.setAllAttributes (otel-attributes (dissoc m :level :when :message)))
@@ -159,4 +152,6 @@
 
 (defn start [config]
   (tracing/set-context-resolver! context/dyn)
-  (supervisor/start-link sup-fn [config]))
+  (let [rc (supervisor/start-link sup-fn [config])]
+    (logger/info {:message "open telemetry log bridge started"})
+    rc))
