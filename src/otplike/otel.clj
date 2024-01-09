@@ -10,7 +10,8 @@
    [otplike.kernel.tracing :as tracing]
    [otplike.kernel.logger :as klogger]
    [otplike.logger :as logger]
-   [steffan-westcott.clj-otel.context :as context])
+   [steffan-westcott.clj-otel.context :as context]
+   [steffan-westcott.clj-otel.api.metrics.instrument :as i])
   (:import
    [io.opentelemetry.api GlobalOpenTelemetry]
    [io.opentelemetry.api.common Attributes]
@@ -105,20 +106,29 @@
            {"exception.message" message})))
     m))
 
+(defonce log-count
+  (i/instrument
+   {:name "otplike.otel.log_count"
+    :instrument-type :counter}))
+
 (defn- output [m]
-  (let
-   [{:keys [level when in message] :as m}
-    (-> m fix-id fix-message fix-exception)
-    log
-    (-> (.getLogsBridge (GlobalOpenTelemetry/get))
-        (.get in)
-        (.logRecordBuilder)
-        (.setAllAttributes (otel-attributes (dissoc m :level :when :message)))
-        (.setSeverityText (name level))
-        (.setSeverity (get otel-severity level Severity/UNDEFINED_SEVERITY_NUMBER))
-        (.setTimestamp (.toInstant when))
-        (.setBody message))]
-    (.emit log)))
+  (try
+    (let
+     [{:keys [level when in message] :as m}
+      (-> m fix-id fix-message fix-exception)
+      log
+      (-> (.getLogsBridge (GlobalOpenTelemetry/get))
+          (.get in)
+          (.logRecordBuilder)
+          (.setAllAttributes (otel-attributes (dissoc m :level :when :message)))
+          (.setSeverityText (name level))
+          (.setSeverity (get otel-severity level Severity/UNDEFINED_SEVERITY_NUMBER))
+          (.setTimestamp (.toInstant when))
+          (.setBody message))]
+      (.emit log)
+      (i/add! log-count {:value 1}))
+    (catch Exception ex
+      (.printStackTrace ex))))
 
 (defonce ^:private in
   (let [ch (async/chan (async/sliding-buffer 16))]
