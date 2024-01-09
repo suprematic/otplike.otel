@@ -163,5 +163,13 @@
 (defn start [config]
   (tracing/set-context-resolver! context/dyn)
   (let [rc (supervisor/start-link sup-fn [config])]
-    (logger/info {:message "open telemetry log bridge started"})
+    (logger/info
+     {:message "open telemetry log bridge started"
+      :properties
+      (->>
+       (System/getProperties)
+       (filter
+        (fn [[p _]]
+          (.startsWith p "otel.")))
+       (into {}))})
     rc))
