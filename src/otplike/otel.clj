@@ -111,7 +111,7 @@
    {:name "otplike.otel.log_count"
     :instrument-type :counter}))
 
-(defn- output [m]
+(defn- output [_config m]
   (try
     (let
      [{:keys [level when in message] :as m}
@@ -130,41 +130,22 @@
     (catch Exception ex
       (.printStackTrace ex))))
 
-(defonce ^:private in
-  (let [ch (async/chan (async/sliding-buffer 16))]
-    (async/tap klogger/mult ch)
-    ch))
-
-(p/proc-defn- p-log [_config]
-  (p/flag :trap-exit true)
-
-  (pu/!chan in)
-
-  (loop [timeout :infinity reason nil]
-    (p/receive!
-     [:EXIT _ reason']
-     (recur 1000 reason')
-
-     message
-     (do
-       (output message)
-       (recur timeout reason))
-
-     (after timeout (p/exit reason)))))
-
-(defn- sup-fn [config]
+(defn- sup-fn [_]
   [:ok
    [{:strategy :one-for-one}
-    [{:id :logger-console
-      :start
-      [(fn []
-         [:ok (p/spawn-link p-log [config])]) []]}]]])
+    []]])
 
-(defn start [config]
+(defn start [{:keys [logger] :as config}]
   (tracing/set-context-resolver! context/dyn)
+
+  (klogger/register-backend!
+   :otel
+   (klogger/make-backend logger output))
+
   (let [rc (supervisor/start-link sup-fn [config])]
     (logger/info
-     {:message "open telemetry log bridge started"
+     {:message "OpenTelemetry log bridge started"
+      :config config
       :properties
       (->>
        (System/getProperties)
@@ -173,3 +154,9 @@
           (.startsWith p "otel.")))
        (into {}))})
     rc))
+
+(defn stop []
+  (tracing/reset-context-resolver!)
+  (klogger/unregister-backend! :otel)
+  (logger/info
+   {:message "OpenTelemetry log bridge stopped"}))

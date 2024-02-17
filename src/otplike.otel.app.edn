@@ -1,6 +1,12 @@
 {:description "OpenTelemetry Support"
  :namespaces  [otplike.otel]
- :start-fn otplike.otel/start}
+ :start-fn otplike.otel/start
+ :stop-fn otplike.otel/stop
+ :environment
+ {:logger
+  {:mask-keys #{:password :secret :secret-key}
+   :threshold :warning
+   :namespaces {}}}}
 
 
 
